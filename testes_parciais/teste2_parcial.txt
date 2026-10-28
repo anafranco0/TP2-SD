@@ -1,0 +1,76 @@
+from core.metadata import Metadata
+import hashlib
+
+
+def main():
+
+    print("=== TESTE 1: Criar Metadata ===")
+
+    metadata = Metadata.create_from_file(
+        "teste.txt",
+        4
+    )
+
+    print("Nome:", metadata.filename)
+    print("Tamanho:", metadata.file_size)
+    print("Chunk Size:", metadata.chunk_size)
+    print("Total Chunks:", metadata.total_chunks)
+    print("Hash Arquivo:", metadata.file_hash)
+
+    print("\nHashes dos chunks:")
+    for i, h in enumerate(metadata.chunk_hashes):
+        print(f"Chunk {i}: {h}")
+
+    print("\n=== TESTE 2: Salvar Metadata ===")
+
+    metadata.save("metadata.json")
+
+    print("Arquivo metadata.json criado com sucesso!")
+
+    print("\n=== TESTE 3: Carregar Metadata ===")
+
+    metadata2 = Metadata.load("metadata.json")
+
+    print("Nome:", metadata2.filename)
+    print("Hash:", metadata2.file_hash)
+
+    print("\n=== TESTE 4: Comparar objetos ===")
+
+    print(
+        metadata.to_dict() == metadata2.to_dict()
+    )
+
+    print("\n=== TESTE 5: Verificar hash do primeiro chunk ===")
+
+    with open("teste.txt", "rb") as f:
+        primeiro_chunk = f.read(4)
+
+    hash_calculado = hashlib.sha256(
+        primeiro_chunk
+    ).hexdigest()
+
+    print("Hash calculado :", hash_calculado)
+    print("Hash armazenado:", metadata.chunk_hashes[0])
+
+    print(
+        "Iguais?",
+        hash_calculado == metadata.chunk_hashes[0]
+    )
+
+    print("\n=== TESTE 6: Chunk maior que o arquivo ===")
+
+    metadata_grande = Metadata.create_from_file(
+        "teste.txt",
+        100
+    )
+
+    print(
+        "Quantidade de chunks:",
+        metadata_grande.total_chunks
+    )
+
+    print("\n=== FIM DOS TESTES ===")
+
+
+if __name__ == "__main__":
+    main()

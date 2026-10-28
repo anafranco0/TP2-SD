@@ -1,0 +1,12 @@
+{
+    "filename": "teste.txt",
+    "file_size": 10,
+    "chunk_size": 4,
+    "total_chunks": 3,
+    "file_hash": "44dae5dccc2e6ca3710dc84afd296754c6cd84465452d7a1d75d876528cc7e44",
+    "chunk_hashes": [
+        "5251c3c68010bca32f4dbedb142270f720fa84a0599816524c85d50c3f589365",
+        "fd501fb4eb0a6c8afc3d11a11aa67249b5d6ec95e67da84ed2cec4144ec7b567",
+        "ac0b52a2ae6ef99999bc08fb31e19188bf0085a4614204068e677e140e1458be"
+    ]
+}

@@ -1,0 +1,14 @@
+from core.chunk import Chunk
+
+def main():
+    chunk = Chunk(
+        index=1,
+        data=b"teste"
+    )
+
+    print("Index:", chunk.index)
+    print("Data:", chunk.data)
+    print("Hash:", chunk.hash)
+
+if __name__ == "__main__":
+    main()
