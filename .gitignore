@@ -1,0 +1,7 @@
+# Diretórios gerados pelos testes
+chunks/
+reconstructed/
+
+# Cache do Python
+__pycache__/
+*.pyc
