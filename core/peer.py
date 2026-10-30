@@ -33,7 +33,11 @@ class Peer:
         self.chunks_vizinhos = {}
         self.trava_chunks = threading.Lock()
 
-        # Chunks requisitados atualmente para evitar pedidos duplicados
+        # Evento que sinaliza que o servidor está efetivamente ouvindo
+        self.servidor_pronto = threading.Event()
+        # Evento que sinaliza que o arquivo foi montado e validado em disco
+        self.arquivo_montado = threading.Event()
+        self.trava_montagem = threading.Lock()
         self.pedidos_em_andamento = set()
         self.trava_pedidos = threading.Lock()
 
@@ -44,7 +48,9 @@ class Peer:
         self.log.progresso(self.storage.bitfield.count(), self.storage.metadata.total_chunks)
 
         # 1. Thread do Servidor
-        threading.Thread(target=self._servidor, daemon=True).start()
+        t_servidor = threading.Thread(target=self._servidor, daemon=True)
+        t_servidor.start()
+        self.servidor_pronto.wait(timeout=3.0)
 
         # 2. Thread de conexão com vizinhos
         threading.Thread(target=self._conectar_vizinhos, daemon=True).start()
@@ -72,21 +78,29 @@ class Peer:
     # =========================================================================
 
     def _servidor(self):
-        try:
-            self.socket_servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket_servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.socket_servidor.bind((self.host, self.porta))
-            self.socket_servidor.listen(10)
-            self.log.info(f"Aguardando conexões na porta {self.porta}...")
+        tentativas = 0
+        while self.rodando and tentativas < 5:
+            try:
+                self.socket_servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.socket_servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                self.socket_servidor.bind((self.host, self.porta))
+                self.socket_servidor.listen(10)
+                self.log.info(f"Aguardando conexões na porta {self.porta}...")
+                self.servidor_pronto.set()
+                break
+            except Exception as e:
+                tentativas += 1
+                if tentativas >= 5:
+                    self.log.erro(f"Erro fatal no servidor ao vincular na porta {self.porta}: {e}")
+                    return
+                time.sleep(0.5)
 
-            while self.rodando:
-                try:
-                    sock_cliente, endereco = self.socket_servidor.accept()
-                    threading.Thread(target=self._atender_cliente, args=(sock_cliente, endereco), daemon=True).start()
-                except OSError:
-                    break
-        except Exception as e:
-            self.log.erro(f"Erro no servidor: {e}")
+        while self.rodando:
+            try:
+                sock_cliente, endereco = self.socket_servidor.accept()
+                threading.Thread(target=self._atender_cliente, args=(sock_cliente, endereco), daemon=True).start()
+            except OSError:
+                break
 
     def _atender_cliente(self, conexao: socket.socket, endereco: tuple[str, int]):
         chave_vizinho = f"{endereco[0]}:{endereco[1]}"
@@ -260,17 +274,20 @@ class Peer:
             # Torna-se Seeder parcial imediatamente
             self._anunciar_have_para_todos(indice)
 
-            if self.storage.download_finalizado():
-                self.log.sucesso("Download 100% concluído! Montando arquivo final...")
-                from pathlib import Path
-                Path(self.pasta_reconstrucao).mkdir(parents=True, exist_ok=True)
-                destino = str(Path(self.pasta_reconstrucao) / self.storage.metadata.filename)
-                
-                valido = self.storage.montar_arquivo(destino)
-                if valido:
-                    self.log.sucesso(f"Arquivo reconstruído e validado com sucesso em '{destino}'!")
-                else:
-                    self.log.erro("Falha na validação do hash global do arquivo reconstruído!")
+            if self.storage.download_finalizado() and not self.arquivo_montado.is_set():
+                with self.trava_montagem:
+                    if not self.arquivo_montado.is_set():
+                        self.log.sucesso("Download 100% concluído! Montando arquivo final...")
+                        from pathlib import Path
+                        Path(self.pasta_reconstrucao).mkdir(parents=True, exist_ok=True)
+                        destino = str(Path(self.pasta_reconstrucao) / self.storage.metadata.filename)
+                        
+                        valido = self.storage.montar_arquivo(destino)
+                        if valido:
+                            self.log.sucesso(f"Arquivo reconstruído e validado com sucesso em '{destino}'!")
+                        else:
+                            self.log.erro("Falha na validação do hash global do arquivo reconstruído!")
+                        self.arquivo_montado.set()
         else:
             self.log.erro(f"Falha na validação de hash do chunk #{indice}!")
 
@@ -304,7 +321,20 @@ class Peer:
                 time.sleep(0.5)
                 continue
 
+            # Se já há muitos pedidos em trânsito nesta conexão, espera as respostas
+            with self.trava_pedidos:
+                em_voo = len(self.pedidos_em_andamento)
+
+            if em_voo >= 64:
+                time.sleep(0.005)
+                continue
+
+            limite_novos = 64 - em_voo
+            pedidos_nesta_rodada = 0
             for bloco in faltando:
+                if pedidos_nesta_rodada >= limite_novos:
+                    break
+
                 with self.trava_pedidos:
                     if bloco in self.pedidos_em_andamento:
                         continue
@@ -318,8 +348,9 @@ class Peer:
                 if candidatos:
                     escolhido = random.choice(candidatos)
                     self._pedir_chunk(escolhido, bloco)
+                    pedidos_nesta_rodada += 1
 
-            time.sleep(0.2)
+            time.sleep(0.005)
 
     def _pedir_chunk(self, chave_vizinho: str, indice: int):
         with self.trava_conexoes:
